@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pole-okr-tracker"
+version = "1.0.0"
+description = "POLE OKR Tracker - a browser OKR workspace with a Python backend"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Proprietary" }
+dependencies = [
+    "Flask>=3.0,<4.0",
+    "waitress>=3.0,<4.0",
+]
+
+[project.optional-dependencies]
+test = ["playwright>=1.40"]
+package = ["pyinstaller>=6.0"]
+
+[project.scripts]
+okr-tracker = "okr_tracker.__main__:main"
+
+[tool.setuptools.packages.find]
+include = ["okr_tracker*"]
+
+[tool.setuptools.package-data]
+okr_tracker = [
+    "templates/*.html",
+    "static/css/*.css",
+    "static/js/*.js",
+    "static/art/*",
+]

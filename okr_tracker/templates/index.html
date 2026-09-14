@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en" dir="ltr" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#08111f">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self' blob:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'">
+<title>POLE OKR Tracker</title>
+<link rel="icon" href="{{ url_for('static', filename='art/favicon.svg') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+<link rel="stylesheet" href="{{ url_for('static', filename='css/backend.css') }}">
+</head>
+<body>
+<img id="workspaceArt" class="workspace-art" alt="" aria-hidden="true" hidden><a class="skip-link" href="#page">Skip to content</a><div id="app"></div><dialog id="modal" aria-labelledby="modalTitle"></dialog><div id="toasts" class="toasts" role="status" aria-live="polite"></div><input id="fileInput" type="file" accept=".json,application/json" hidden>
+<!-- Server-rendered bootstrap: API endpoints, artwork URLs, and the workspace
+     itself. The application's load() is synchronous and runs on first paint, so
+     the document has to be in the page before app.js is. This is a data block
+     rather than an inline script so the page keeps a strict script-src. -->
+<script type="application/json" id="okrBootstrap">{{ bootstrap_json|safe }}</script>
+<script src="{{ url_for('static', filename='js/backend-store.js') }}"></script>
+<script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

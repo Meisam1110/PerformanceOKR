@@ -1,0 +1,6 @@
+/* Styling for chrome that backend-store.js adds outside the app's own DOM. */
+#okrBackendStatus{position:fixed;inset-block-end:16px;inset-inline-start:16px;z-index:60;max-width:min(360px,calc(100vw - 32px));padding:10px 16px;border-radius:999px;font-size:13px;line-height:1.5;font-weight:600;background:var(--surface2);color:var(--muted);border:1px solid var(--line);box-shadow:var(--shadow);opacity:0;transform:translateY(8px);transition:opacity .2s ease,transform .2s ease;pointer-events:none}
+#okrBackendStatus[data-visible=true]{opacity:1;transform:translateY(0)}
+#okrBackendStatus[data-tone=warn]{background:var(--amber-bg);color:var(--amber);border-color:var(--amber)}
+@media(prefers-reduced-motion:reduce){#okrBackendStatus{transition:none}}
+@media print{#okrBackendStatus{display:none}}
