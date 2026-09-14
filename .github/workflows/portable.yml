@@ -105,23 +105,39 @@ jobs:
       - name: Check the data folder resolved to the app folder
         shell: pwsh
         run: |
+          $ErrorActionPreference = "Stop"
           $bundle = (Resolve-Path "dist/OKR-Tracker-Portable").Path
-          if (-not (Test-Path "$bundle\data\secret.key")) {
-            throw "the app did not use its own data folder; check okr-tracker.ini"
+
+          Write-Host "--- bundle root ---"
+          Get-ChildItem $bundle | Select-Object Mode, Length, Name | Format-Table | Out-String | Write-Host
+          Write-Host "--- data folder ---"
+          if (Test-Path "$bundle\data") {
+            Get-ChildItem "$bundle\data" -Force | Select-Object Length, Name | Format-Table | Out-String | Write-Host
+          } else {
+            Write-Host "(no data folder)"
+          }
+
+          # Ask the app itself, from the working directory CMD would have left
+          # us in on a network share. Out-String collapses the output to one
+          # string: PowerShell's -match on an array filters instead of
+          # answering true or false.
+          Push-Location "C:\Windows"
+          try {
+            $where = & "$bundle\python\python.exe" -m okr_tracker where 2>&1 | Out-String
+          } finally {
+            Pop-Location
+          }
+          Write-Host "--- okr_tracker where (from C:\Windows) ---"
+          Write-Host $where
+
+          if (-not $where.Contains("$bundle\data")) {
+            throw "okr_tracker resolved its data directory outside the app folder"
           }
           if (Test-Path "C:\Windows\data") {
             throw "the app wrote relative to the working directory"
           }
-          # Ask the app itself, again from the wrong working directory.
-          Push-Location "C:\Windows"
-          try {
-            $where = & "$bundle\python\python.exe" -m okr_tracker where
-          } finally {
-            Pop-Location
-          }
-          $where
-          if ($where -notmatch [regex]::Escape("$bundle\data")) {
-            throw "okr_tracker resolved its data directory outside the app folder"
+          if (-not (Test-Path "$bundle\data\secret.key")) {
+            throw "the server did not write into the app's own data folder"
           }
           Write-Host "Settings and data resolve to the app folder, whatever the working directory."
 
