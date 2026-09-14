@@ -98,26 +98,38 @@ jobs:
             if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -Force }
           }
 
-      # The app must have found okr-tracker.ini from its own location, not
-      # from the working directory, and stored the workspace beside it.
-      - name: Check the workspace landed in the app folder
+      # Proof the app read okr-tracker.ini from its own folder rather than
+      # from the working directory. secret.key is written by the server on
+      # startup; workspace.json is not, because the sample workspace is built
+      # by the page's JavaScript and nothing here runs a browser.
+      - name: Check the data folder resolved to the app folder
         shell: pwsh
         run: |
-          $workspace = "dist/OKR-Tracker-Portable/data/workspace.json"
-          if (-not (Test-Path $workspace)) {
-            throw "the shared data folder was not used; check okr-tracker.ini"
+          $bundle = (Resolve-Path "dist/OKR-Tracker-Portable").Path
+          if (-not (Test-Path "$bundle\data\secret.key")) {
+            throw "the app did not use its own data folder; check okr-tracker.ini"
           }
           if (Test-Path "C:\Windows\data") {
             throw "the app wrote relative to the working directory"
           }
-          Write-Host "Workspace stored in the app folder, as configured."
+          # Ask the app itself, again from the wrong working directory.
+          Push-Location "C:\Windows"
+          try {
+            $where = & "$bundle\python\python.exe" -m okr_tracker where
+          } finally {
+            Pop-Location
+          }
+          $where
+          if ($where -notmatch [regex]::Escape("$bundle\data")) {
+            throw "okr_tracker resolved its data directory outside the app folder"
+          }
+          Write-Host "Settings and data resolve to the app folder, whatever the working directory."
 
       # The launcher a user actually double-clicks, run the way they run it.
       - name: Start it through OKR Tracker.vbs
         shell: pwsh
         run: |
           $bundle = (Resolve-Path "dist/OKR-Tracker-Portable").Path
-          Remove-Item -Recurse -Force "$bundle\data\*" -ErrorAction SilentlyContinue
           Start-Process -FilePath "wscript.exe" `
             -ArgumentList "`"$bundle\OKR Tracker.vbs`"" `
             -WorkingDirectory "C:\Windows"
