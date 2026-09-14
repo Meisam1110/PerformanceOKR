@@ -11,43 +11,99 @@ more than one browser or machine, and can be managed from a terminal.
 
 ## Install
 
-**Download the folder and run it. That is the whole install.**
+### For everyone in the team: the portable folder
 
-| | |
-| --- | --- |
-| **Windows** | double-click **`Start OKR Tracker.bat`** |
-| **macOS** | double-click **`Start OKR Tracker.command`** |
-| **Linux** | run **`./start.sh`**, or `python3 run.py` |
+**No Python, no installer, no administrator rights.** Download
+`OKR-Tracker-Portable.zip`, unzip it, double-click **OKR Tracker.bat**. Your
+browser opens on the tracker.
 
-The first run takes a few seconds: it builds a private `.venv` next to the
-application, installs Flask and waitress into it, and starts. Later runs open
-immediately. Nothing is added to your system Python, and nothing is installed at
-all if those two packages are already available.
+Get the zip from the **Actions** tab of this repository: open the most recent
+*Build portable Windows app* run and download it from **Artifacts** at the
+bottom. Tagged releases carry it as a release asset too.
 
-Then the app opens in your browser at <http://127.0.0.1:8765>. Sign in as
-**POLE administrator** with the initial password shown on the entry screen, and
-change it under *Administration → Working profiles*.
+The folder contains a complete, self-contained python.org runtime, so nothing
+is installed and nothing is added to PATH. Every binary in it is a signed
+python.org file rather than a custom-built executable, which matters where IT
+blocks unknown `.exe` files.
 
-The only requirement is **Python 3.9 or newer**. If it is missing, the launchers
-say so and point at <https://www.python.org/downloads/> rather than failing with
-a traceback.
+### Sharing one workspace with the team
 
-### Other ways in
+Unzip the folder onto your shared drive and have everyone run it from there.
+The bundled `okr-tracker.ini` keeps the data inside the folder, so **everyone
+sees and edits the same OKRs** with nothing to configure.
+
+Simultaneous edits are safe. Saves are serialised with a lock file that holds
+across machines, and a save that loses a race is reported in the app rather
+than quietly overwriting someone else's work. Each browser rechecks for other
+people's changes every 15 seconds.
+
+To give each person a private workspace instead, comment out the `data_dir`
+line in `okr-tracker.ini`.
+
+> **A note on the network drive.** Running directly from a share works, but
+> starts more slowly than from a local disk, and some antivirus policies block
+> `.bat` files on network drives. If a double-click does nothing, copy the
+> folder to the desktop and run it from there — or use the shared-host setup
+> below instead.
+
+### For a team that would rather not copy anything
+
+Run the tracker on one always-on PC with `--host 0.0.0.0 --passphrase "…"` and
+send everyone the link. Nobody downloads anything at all; they just open a
+browser. See [Sharing a workspace](#sharing-a-workspace).
+
+### From source
+
+If you already have **Python 3.9+**, the repository runs directly and installs
+what it needs on first run:
 
 ```bash
-python run.py                  # same thing, from a terminal
-make run                       # if you prefer make (make help lists the rest)
+python run.py                  # builds a private .venv, then serves
+make run                       # the same, via make
 uv run run.py                  # uv handles the dependencies itself
-pip install .                  # installs an `okr-tracker` command system-wide
+pip install .                  # installs an `okr-tracker` command
 ```
 
-Managing dependencies yourself? Set `OKR_NO_BOOTSTRAP=1` and the launcher will
-never touch a virtual environment:
+On Windows, `Start OKR Tracker.bat` does this by double-click; on macOS,
+`Start OKR Tracker.command`; on Linux, `./start.sh`.
+
+Managing dependencies yourself? `OKR_NO_BOOTSTRAP=1` stops it touching a
+virtual environment:
 
 ```bash
 python -m pip install -r requirements.txt
 OKR_NO_BOOTSTRAP=1 python run.py
 ```
+
+### Building the portable folder yourself
+
+```bash
+python tools/build_portable.py            # any OS with a network connection
+python tools/build_portable.py --python-version 3.12.7
+```
+
+It downloads the embeddable Python, installs the two dependencies, and writes
+`dist/OKR-Tracker-Portable(.zip)`. GitHub Actions runs the same script on
+Windows, starts the bundled app and checks it serves before publishing.
+
+## Settings
+
+A portable copy reads `okr-tracker.ini` from its own folder, so a shared
+deployment carries its configuration with it. Relative paths are measured from
+that folder:
+
+```ini
+[tracker]
+data_dir = data      ; one shared workspace inside the folder
+host = 127.0.0.1
+port = 8765
+poll_seconds = 15
+backup_count = 30
+; read_only = true
+```
+
+Environment variables (`OKR_DATA_DIR`, `OKR_PORT`, …) override the file, and
+command line flags override both.
 
 ## Where your data goes
 
@@ -57,7 +113,8 @@ OKR_NO_BOOTSTRAP=1 python run.py
 | Backups | `<data dir>/backups/` (the last 30 saves) |
 | Session key | `<data dir>/secret.key` |
 
-`<data dir>` follows each platform's convention — `~/.local/share/pole-okr-tracker`
+In a portable copy `<data dir>` is the `data` folder inside it. Otherwise it
+follows each platform's convention — `~/.local/share/pole-okr-tracker`
 on Linux, `~/Library/Application Support/pole-okr-tracker` on macOS,
 `%APPDATA%\pole-okr-tracker` on Windows. `python -m okr_tracker where` prints the
 exact paths and a summary of what is stored. Override it with `--data-dir` or
@@ -202,8 +259,10 @@ python tests/run_all.py
 
 36 backend tests cover the store's compare-and-swap, atomic writes, backup
 retention, concurrent writers, schema validation, the API, read-only mode and
-the passphrase gate. 10 more cover the first-run installer: when it does
-nothing, when it refuses rather than guessing, and that it cannot loop.
+the passphrase gate. 10 more cover the first-run installer, and 22 cover the
+portable deployment: the ini file's precedence, the cross-machine lock under
+eight competing processes, running with no console at all, and that the
+assembled bundle really resolves its data into its own folder.
 
 The installer's one live test actually builds an environment from a Python with
 no Flask, and is skipped by default because it needs the network:
@@ -241,9 +300,13 @@ okr_tracker/
   schema.py                structural validation
   auth.py                  PBKDF2 (browser-compatible) and the server gate
   bootstrap.py             first-run virtual environment and dependency install
-  config.py                settings and per-platform data directory
+  config.py                settings: okr-tracker.ini, environment, defaults
+  filelock.py              cross-machine lock for a workspace on a shared drive
+  headless.py              logging and error reporting when there is no console
   static/, templates/      built by tools/build_frontend.py
-tools/build_frontend.py    the build step
+tools/build_frontend.py    splits the single-file HTML into static assets
+tools/build_portable.py    assembles the no-install Windows folder
+.github/workflows/         tests, and the portable build
 packaging/okr-tracker.spec PyInstaller spec
 vendor/                    the original single-file HTML, kept as the build input
 tests/

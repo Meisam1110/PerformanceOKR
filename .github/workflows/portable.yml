@@ -1,0 +1,144 @@
+name: Build portable Windows app
+
+# Produces OKR-Tracker-Portable.zip: the tracker plus a self-contained
+# python.org runtime, ready to unzip onto a shared drive. Nobody needs Python,
+# an installer, or administrator rights to run it.
+#
+# Where the zip appears:
+#   * every run  -> the "Artifacts" section at the bottom of the run's summary
+#                   page (Actions tab). Kept for 90 days.
+#   * a tag like v1.0.1 -> attached to the GitHub release as well.
+#
+# To build one on demand, open the Actions tab, pick this workflow and press
+# "Run workflow".
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      python_version:
+        description: Embedded Python version to bundle
+        default: "3.11.9"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      # The browser tests skip themselves without Playwright, so install it and
+      # get the real coverage.
+      - name: Install Playwright
+        run: |
+          python -m pip install playwright
+          python -m playwright install --with-deps chromium
+
+      - name: Run the test suite
+        run: python tests/run_all.py
+
+  portable:
+    name: Portable bundle
+    needs: test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Build the bundle
+        run: >
+          python tools/build_portable.py
+          --python-version ${{ github.event.inputs.python_version || '3.11.9' }}
+
+      # Proof the bundle runs before anyone downloads it: start the app with
+      # the embedded interpreter and check it actually serves.
+      - name: Smoke-test the bundle
+        shell: pwsh
+        run: |
+          $bundle = "dist/OKR-Tracker-Portable"
+          $app = Start-Process -PassThru -WindowStyle Hidden `
+            -FilePath "$bundle/python/python.exe" `
+            -ArgumentList "-m","okr_tracker","--no-browser","--port","8765" `
+            -WorkingDirectory $bundle
+          try {
+            $ok = $false
+            foreach ($attempt in 1..30) {
+              Start-Sleep -Seconds 2
+              try {
+                $health = Invoke-RestMethod "http://127.0.0.1:8765/api/health" -TimeoutSec 5
+                if ($health.status -eq "ok") { $ok = $true; break }
+              } catch { }
+            }
+            if (-not $ok) { throw "the bundled app did not start" }
+            $page = Invoke-WebRequest "http://127.0.0.1:8765/" -TimeoutSec 10
+            if ($page.StatusCode -ne 200) { throw "the app did not serve its page" }
+            if ($page.Content -notmatch "okrBootstrap") { throw "the page is missing its data" }
+            Write-Host "The bundled app starts and serves correctly."
+          } finally {
+            if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -Force }
+          }
+
+      - name: Check the workspace was written inside the folder
+        shell: pwsh
+        run: |
+          $workspace = "dist/OKR-Tracker-Portable/data/workspace.json"
+          if (-not (Test-Path $workspace)) {
+            throw "the shared data folder was not used; check okr-tracker.ini"
+          }
+          Write-Host "Workspace stored in the app folder, as configured."
+
+      # Remove the smoke test's data so nobody downloads a bundle with a
+      # workspace already in it.
+      - name: Reset the bundle's data folder
+        shell: pwsh
+        run: |
+          Remove-Item -Recurse -Force dist/OKR-Tracker-Portable/data/*
+          New-Item -ItemType File -Path dist/OKR-Tracker-Portable/data/.gitkeep | Out-Null
+          Remove-Item -Force dist/OKR-Tracker-Portable.zip -ErrorAction SilentlyContinue
+          Compress-Archive -Path dist/OKR-Tracker-Portable -DestinationPath dist/OKR-Tracker-Portable.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: OKR-Tracker-Portable
+          path: dist/OKR-Tracker-Portable.zip
+          retention-days: 90
+          if-no-files-found: error
+
+  release:
+    name: Attach to release
+    needs: portable
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: OKR-Tracker-Portable
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: OKR-Tracker-Portable.zip
+          body: |
+            **Download `OKR-Tracker-Portable.zip`**, unzip it, and double-click
+            **OKR Tracker.bat**. Nothing needs installing.
+
+            To share one workspace with your team, unzip the folder onto a
+            shared drive and have everyone run it from there.

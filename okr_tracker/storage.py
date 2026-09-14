@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .filelock import FileLock
+
 
 class ConflictError(RuntimeError):
     """Raised when a write is based on a revision the store has moved past."""
@@ -60,8 +62,15 @@ class WorkspaceStore:
         self.path = Path(path)
         self.backup_dir = self.path.parent / "backups"
         self.backup_count = max(0, backup_count)
-        self._lock = threading.Lock()
+        # Two locks, two scopes: the threading lock serialises this process's
+        # own request threads, the file lock serialises other processes and
+        # other machines sharing the same folder over the network.
+        self._lock = threading.RLock()
+        self.lock_path = self.path.with_name(self.path.name + ".lock")
         self.path.parent.mkdir(parents=True, exist_ok=True)
+
+    def _exclusive(self) -> FileLock:
+        return FileLock(self.lock_path)
 
     # ---------------------------------------------------------------- read
 
@@ -98,7 +107,7 @@ class WorkspaceStore:
         A mismatch raises :class:`ConflictError` carrying the current document,
         which the client uses to resynchronise.
         """
-        with self._lock:
+        with self._lock, self._exclusive():
             current = self._read_unlocked()
             expected = (base_revision or "") if base_revision is not None else ""
             if current.revision != expected:
@@ -109,7 +118,7 @@ class WorkspaceStore:
 
     def overwrite(self, data: dict[str, Any]) -> Document:
         """Replace the document unconditionally (import and restore paths)."""
-        with self._lock:
+        with self._lock, self._exclusive():
             self._backup_unlocked(self._read_unlocked())
             self._replace_unlocked(data)
             return Document(data=data, revision=str(data.get("revision") or ""))

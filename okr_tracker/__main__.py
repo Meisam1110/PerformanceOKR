@@ -18,7 +18,7 @@ import webbrowser
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import __version__, auth
+from . import __version__, auth, headless
 from .config import APP_NAME, Settings
 from .schema import ValidationError, validate
 from .storage import WorkspaceStore
@@ -38,7 +38,45 @@ def _now() -> str:
 # ------------------------------------------------------------------- serve
 
 
+def _already_serving(host: str, port: int) -> bool:
+    """True when our own tracker is already answering on this port.
+
+    Double-clicking the launcher twice is the normal way people "reopen" an
+    app, and failing with "address already in use" would be a poor answer. A
+    stranger on the port is not ours to reuse, so this checks that what
+    responds is actually the tracker.
+    """
+    import urllib.error
+    import urllib.request
+
+    target = "127.0.0.1" if host in ("0.0.0.0", "::", "") else host
+    try:
+        with urllib.request.urlopen(
+            f"http://{target}:{port}/api/health", timeout=2
+        ) as response:
+            return json.loads(response.read()).get("status") == "ok"
+    except urllib.error.HTTPError:
+        # Something served an error rather than refusing the connection. The
+        # passphrase gate answers 401 here, so this is still our own server.
+        return True
+    except (urllib.error.URLError, OSError, ValueError):
+        # Nothing listening, or something that is not the tracker.
+        return False
+
+
 def _serve(settings: Settings, *, open_browser: bool, debug: bool) -> int:
+    url = (
+        f"http://{'127.0.0.1' if settings.host in ('0.0.0.0', '::') else settings.host}"
+        f":{settings.port}/"
+    )
+
+    if _already_serving(settings.host, settings.port):
+        print(f"{APP_NAME} is already running at {url}")
+        print("Opening it in your browser.")
+        if open_browser:
+            webbrowser.open(url)
+        return 0
+
     try:
         from .app import create_app
     except ImportError as error:  # pragma: no cover - environment problem
@@ -50,7 +88,6 @@ def _serve(settings: Settings, *, open_browser: bool, debug: bool) -> int:
         return 1
 
     app = create_app(settings)
-    url = f"http://{'127.0.0.1' if settings.host in ('0.0.0.0', '::') else settings.host}:{settings.port}/"
 
     print(f"{APP_NAME} {__version__}")
     print(f"  workspace  {settings.workspace_path}")
@@ -242,6 +279,18 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Before anything can print: under pythonw.exe there is no stdout at all.
+    headless.capture()
+    try:
+        return _main(argv)
+    except SystemExit:
+        raise
+    except BaseException as error:  # noqa: BLE001 - last chance to be seen
+        headless.report(error)
+        return 1
+
+
+def _main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
 
     settings = Settings()
@@ -255,6 +304,9 @@ def main(argv: list[str] | None = None) -> int:
         settings.passphrase = args.passphrase
     if args.read_only:
         settings.read_only = True
+
+    # Now that the data directory is known, the log file has a home.
+    headless.redirect(settings.data_dir)
 
     command = args.command or "serve"
     if command == "serve":
