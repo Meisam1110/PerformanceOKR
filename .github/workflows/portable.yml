@@ -183,7 +183,7 @@ jobs:
           if-no-files-found: error
 
   release:
-    name: Attach to release
+    name: Publish release
     needs: portable
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
@@ -194,13 +194,43 @@ jobs:
         with:
           name: OKR-Tracker-Portable
 
-      - uses: softprops/action-gh-release@v2
-        with:
-          files: OKR-Tracker-Portable.zip
-          body: |
-            **Download `OKR-Tracker-Portable.zip`**, unzip it, and double-click
-            **OKR Tracker.vbs**. Nothing needs installing — no Python, no
-            administrator rights.
+      # gh is preinstalled on the runner, so this needs no third-party action
+      # and no extra permissions beyond the token above.
+      - name: Attach the bundle to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## Download and run
 
-            To share one workspace with your team, unzip the folder onto a
-            shared drive and have everyone run it from there.
+          Download **OKR-Tracker-Portable.zip** below, unzip it, and
+          double-click **OKR Tracker.vbs**. Your browser opens on the tracker.
+
+          No Python, no installer, no administrator rights. Everything the app
+          needs is inside the folder, and every binary in it is a signed
+          python.org file.
+
+          ## Sharing one workspace with a team
+
+          Unzip the folder onto a shared drive and have everyone run it from
+          there. It keeps its data inside the folder, so everyone sees and
+          edits the same OKRs. Simultaneous saves are serialised across
+          machines, and a save that loses a race is reported rather than
+          overwriting someone.
+
+          If Windows says *"UNC paths are not supported"*, that is CMD talking
+          about network paths and it is harmless -- the app does not use the
+          working directory. Use `OKR Tracker.vbs` and you will not see it at
+          all.
+          NOTES
+
+          gh release create "${GITHUB_REF_NAME}" \
+            OKR-Tracker-Portable.zip \
+            --repo "${GITHUB_REPOSITORY}" \
+            --title "POLE OKR Tracker ${GITHUB_REF_NAME}" \
+            --notes-file notes.md
+
+      - name: Print the permanent download link
+        run: |
+          echo "Always-latest link, no login needed on a public repository:"
+          echo "https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/OKR-Tracker-Portable.zip"
