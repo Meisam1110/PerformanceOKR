@@ -14,7 +14,7 @@ more than one browser or machine, and can be managed from a terminal.
 ### For everyone in the team: the portable folder
 
 **No Python, no installer, no administrator rights.** Download
-`OKR-Tracker-Portable.zip`, unzip it, double-click **OKR Tracker.bat**. Your
+`OKR-Tracker-Portable.zip`, unzip it, double-click **OKR Tracker.vbs**. Your
 browser opens on the tracker.
 
 Get the zip from the **Actions** tab of this repository: open the most recent
@@ -40,11 +40,18 @@ people's changes every 15 seconds.
 To give each person a private workspace instead, comment out the `data_dir`
 line in `okr-tracker.ini`.
 
-> **A note on the network drive.** Running directly from a share works, but
-> starts more slowly than from a local disk, and some antivirus policies block
-> `.bat` files on network drives. If a double-click does nothing, copy the
-> folder to the desktop and run it from there — or use the shared-host setup
-> below instead.
+> **A note on the network drive.** Running from a UNC path
+> (`\\server\share\...`) works, but Windows cannot use one as a console
+> working directory: launching a `.bat` there prints *"UNC paths are not
+> supported. Defaulting to Windows directory."* before the script runs a line.
+> That is why `OKR Tracker.vbs` is the recommended icon — it never opens a
+> console — and why no launcher or code path depends on the working directory;
+> CI starts the bundle from `C:\Windows` to keep it that way.
+>
+> Starting from a share is slower than from a local disk, and some antivirus
+> policies block scripts on network drives outright. If a double-click does
+> nothing, copy the folder to the desktop and run it from there — or use the
+> shared-host setup below.
 
 ### For a team that would rather not copy anything
 

@@ -277,6 +277,28 @@ raise SystemExit(main(["where"]))
             self.assertIn("data directory", log.read_text(encoding="utf-8"))
 
 
+class SourceLauncherTests(unittest.TestCase):
+    """The repository's own Windows launcher has the same UNC constraint."""
+
+    def test_it_never_changes_directory(self):
+        text = (ROOT / "Start OKR Tracker.bat").read_text(encoding="utf-8")
+        commands = [
+            line.strip() for line in text.splitlines()
+            if line.strip() and not line.strip().lower().startswith("rem")
+        ]
+        offenders = [
+            line for line in commands
+            if line.lower().startswith(("cd ", "cd/", "pushd", "popd"))
+        ]
+        self.assertEqual(offenders, [], "CMD cannot cd into a UNC share")
+        self.assertIn('"%APP%run.py"', text, "run.py must be found absolutely")
+
+    def test_it_does_not_promise_an_executable_we_do_not_ship(self):
+        text = (ROOT / "Start OKR Tracker.bat").read_text(encoding="utf-8")
+        self.assertNotIn(".exe, which needs nothing", text)
+        self.assertIn("portable folder", text)
+
+
 class PortableBuildTests(unittest.TestCase):
     """The assembly step, without the network download."""
 
@@ -301,19 +323,44 @@ class PortableBuildTests(unittest.TestCase):
             list(package.rglob("__pycache__")), "caches should not be shipped"
         )
 
-    def test_writes_a_launcher_that_avoids_the_unc_trap(self):
+    def test_the_launchers_never_depend_on_the_working_directory(self):
+        """The UNC trap, closed for good.
+
+        CMD refuses a UNC path (\\\\server\\share\\...) as a working directory and
+        drops to C:\\Windows *before* a .bat on a network share runs its first
+        line, so any relative path would resolve in the wrong place. Neither
+        launcher may rely on the working directory at all.
+        """
         self.builder.write_support_files(self.bundle)
-        launcher = (self.bundle / "OKR Tracker.bat").read_text(encoding="utf-8")
-        commands = [
-            line for line in launcher.splitlines()
-            if line.strip() and not line.strip().lower().startswith(("rem ", "rem\t"))
-        ]
-        self.assertTrue(any(line.startswith("pushd ") for line in commands))
-        self.assertFalse(
-            [line for line in commands if line.lstrip().lower().startswith("cd /d")],
-            "cd /d silently fails on the UNC path of a network share",
-        )
-        self.assertIn("pythonw.exe", launcher, "no console window for the normal start")
+        for name in ("OKR Tracker.bat", "OKR Tracker (debug).bat"):
+            text = (self.bundle / name).read_text(encoding="utf-8")
+            commands = [
+                line.strip() for line in text.splitlines()
+                if line.strip() and not line.strip().lower().startswith("rem")
+            ]
+            offenders = [
+                line for line in commands
+                if line.lower().startswith(("cd ", "cd/", "pushd", "popd"))
+            ]
+            self.assertEqual(offenders, [], f"{name} must not change directory")
+            self.assertIn("%~dp0", text, f"{name} must build absolute paths")
+
+    def test_ships_a_no_console_launcher(self):
+        """The .vbs icon avoids cmd.exe, so the UNC banner never appears."""
+        self.builder.write_support_files(self.bundle)
+        vbs = (self.bundle / "OKR Tracker.vbs").read_text(encoding="utf-8")
+        self.assertIn("pythonw.exe", vbs, "no console window")
+        self.assertIn("WScript.ScriptFullName", vbs, "locates its own folder")
+        self.assertIn("shell.Run command, 0, False", vbs, "hidden, non-blocking")
+        self.assertNotIn('""""', vbs, "quoting must survive the build")
+
+    def test_windows_files_use_crlf_line_endings(self):
+        self.builder.write_support_files(self.bundle)
+        for name in ("OKR Tracker.vbs", "OKR Tracker.bat", "okr-tracker.ini"):
+            raw = (self.bundle / name).read_bytes()
+            self.assertNotIn(
+                b"\n", raw.replace(b"\r\n", b""), f"{name} has a bare LF"
+            )
 
     def test_ships_a_config_that_shares_the_workspace(self):
         self.builder.write_support_files(self.bundle)

@@ -14,10 +14,10 @@ name: Build portable Windows app
 
 on:
   push:
-    branches: [main]
+    # Every branch, so a usable zip exists before anything is merged.
+    branches: ["**"]
     tags: ["v*"]
   pull_request:
-    branches: [main]
   workflow_dispatch:
     inputs:
       python_version:
@@ -67,16 +67,19 @@ jobs:
           python tools/build_portable.py
           --python-version ${{ github.event.inputs.python_version || '3.11.9' }}
 
-      # Proof the bundle runs before anyone downloads it: start the app with
-      # the embedded interpreter and check it actually serves.
-      - name: Smoke-test the bundle
+      # Proof the bundle runs before anyone downloads it. Deliberately started
+      # from C:\Windows, which is exactly where CMD dumps you when the folder
+      # lives on a network share ("UNC paths are not supported. Defaulting to
+      # Windows directory."). If anything in the app still depended on the
+      # working directory, this step would fail rather than the user.
+      - name: Smoke-test the bundle from the wrong working directory
         shell: pwsh
         run: |
-          $bundle = "dist/OKR-Tracker-Portable"
+          $bundle = (Resolve-Path "dist/OKR-Tracker-Portable").Path
           $app = Start-Process -PassThru -WindowStyle Hidden `
-            -FilePath "$bundle/python/python.exe" `
+            -FilePath "$bundle\python\python.exe" `
             -ArgumentList "-m","okr_tracker","--no-browser","--port","8765" `
-            -WorkingDirectory $bundle
+            -WorkingDirectory "C:\Windows"
           try {
             $ok = $false
             foreach ($attempt in 1..30) {
@@ -95,14 +98,44 @@ jobs:
             if ($app -and -not $app.HasExited) { Stop-Process -Id $app.Id -Force }
           }
 
-      - name: Check the workspace was written inside the folder
+      # The app must have found okr-tracker.ini from its own location, not
+      # from the working directory, and stored the workspace beside it.
+      - name: Check the workspace landed in the app folder
         shell: pwsh
         run: |
           $workspace = "dist/OKR-Tracker-Portable/data/workspace.json"
           if (-not (Test-Path $workspace)) {
             throw "the shared data folder was not used; check okr-tracker.ini"
           }
+          if (Test-Path "C:\Windows\data") {
+            throw "the app wrote relative to the working directory"
+          }
           Write-Host "Workspace stored in the app folder, as configured."
+
+      # The launcher a user actually double-clicks, run the way they run it.
+      - name: Start it through OKR Tracker.vbs
+        shell: pwsh
+        run: |
+          $bundle = (Resolve-Path "dist/OKR-Tracker-Portable").Path
+          Remove-Item -Recurse -Force "$bundle\data\*" -ErrorAction SilentlyContinue
+          Start-Process -FilePath "wscript.exe" `
+            -ArgumentList "`"$bundle\OKR Tracker.vbs`"" `
+            -WorkingDirectory "C:\Windows"
+          $ok = $false
+          foreach ($attempt in 1..30) {
+            Start-Sleep -Seconds 2
+            try {
+              $health = Invoke-RestMethod "http://127.0.0.1:8765/api/health" -TimeoutSec 5
+              if ($health.status -eq "ok") { $ok = $true; break }
+            } catch { }
+          }
+          Get-Process pythonw -ErrorAction SilentlyContinue | Stop-Process -Force
+          if (-not $ok) {
+            $log = "$bundle\data\launcher.log"
+            if (Test-Path $log) { Get-Content $log }
+            throw "OKR Tracker.vbs did not start the app"
+          }
+          Write-Host "The .vbs launcher starts the app with no console window."
 
       # Remove the smoke test's data so nobody downloads a bundle with a
       # workspace already in it.
@@ -138,7 +171,8 @@ jobs:
           files: OKR-Tracker-Portable.zip
           body: |
             **Download `OKR-Tracker-Portable.zip`**, unzip it, and double-click
-            **OKR Tracker.bat**. Nothing needs installing.
+            **OKR Tracker.vbs**. Nothing needs installing — no Python, no
+            administrator rights.
 
             To share one workspace with your team, unzip the folder onto a
             shared drive and have everyone run it from there.
