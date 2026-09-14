@@ -9,20 +9,45 @@ more than one browser or machine, and can be managed from a terminal.
 
 ![Overview](docs/overview.png)
 
-## Run it
+## Install
+
+**Download the folder and run it. That is the whole install.**
+
+| | |
+| --- | --- |
+| **Windows** | double-click **`Start OKR Tracker.bat`** |
+| **macOS** | double-click **`Start OKR Tracker.command`** |
+| **Linux** | run **`./start.sh`**, or `python3 run.py` |
+
+The first run takes a few seconds: it builds a private `.venv` next to the
+application, installs Flask and waitress into it, and starts. Later runs open
+immediately. Nothing is added to your system Python, and nothing is installed at
+all if those two packages are already available.
+
+Then the app opens in your browser at <http://127.0.0.1:8765>. Sign in as
+**POLE administrator** with the initial password shown on the entry screen, and
+change it under *Administration → Working profiles*.
+
+The only requirement is **Python 3.9 or newer**. If it is missing, the launchers
+say so and point at <https://www.python.org/downloads/> rather than failing with
+a traceback.
+
+### Other ways in
+
+```bash
+python run.py                  # same thing, from a terminal
+make run                       # if you prefer make (make help lists the rest)
+uv run run.py                  # uv handles the dependencies itself
+pip install .                  # installs an `okr-tracker` command system-wide
+```
+
+Managing dependencies yourself? Set `OKR_NO_BOOTSTRAP=1` and the launcher will
+never touch a virtual environment:
 
 ```bash
 python -m pip install -r requirements.txt
-python run.py
+OKR_NO_BOOTSTRAP=1 python run.py
 ```
-
-The app starts on <http://127.0.0.1:8765> and opens in your browser. The first
-run creates a sample workspace; sign in as **POLE administrator** with the
-initial password shown on the entry screen, then change it under
-*Administration → Working profiles*.
-
-Nothing else needs installing: Flask and waitress are the only dependencies, and
-both are pure Python.
 
 ## Where your data goes
 
@@ -159,6 +184,7 @@ uses.
 For people who should not have to install Python at all:
 
 ```bash
+make app          # or, by hand:
 python -m pip install -r requirements.txt pyinstaller
 python -m PyInstaller packaging/okr-tracker.spec
 ```
@@ -176,7 +202,15 @@ python tests/run_all.py
 
 36 backend tests cover the store's compare-and-swap, atomic writes, backup
 retention, concurrent writers, schema validation, the API, read-only mode and
-the passphrase gate.
+the passphrase gate. 10 more cover the first-run installer: when it does
+nothing, when it refuses rather than guessing, and that it cannot loop.
+
+The installer's one live test actually builds an environment from a Python with
+no Flask, and is skipped by default because it needs the network:
+
+```bash
+OKR_TEST_BOOTSTRAP=1 python tests/run_all.py
+```
 
 10 end-to-end tests drive the real application in Chromium against a real
 server: first-run seeding, reload, a UI-driven sign-in and edit reaching disk, a
@@ -192,7 +226,11 @@ python -m pip install playwright && python -m playwright install chromium
 ## Layout
 
 ```
-run.py                     launcher
+Start OKR Tracker.bat      double-click launcher (Windows)
+Start OKR Tracker.command  double-click launcher (macOS)
+start.sh                   launcher (Linux, and what the macOS one calls)
+run.py                     the launcher proper: installs on first run, then serves
+Makefile                   make run / install / test / build / app
 requirements.txt
 pyproject.toml             installs an `okr-tracker` command
 okr_tracker/
@@ -202,6 +240,7 @@ okr_tracker/
   storage.py               atomic JSON document store with backups
   schema.py                structural validation
   auth.py                  PBKDF2 (browser-compatible) and the server gate
+  bootstrap.py             first-run virtual environment and dependency install
   config.py                settings and per-platform data directory
   static/, templates/      built by tools/build_frontend.py
 tools/build_frontend.py    the build step
